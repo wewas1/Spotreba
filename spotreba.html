@@ -34,6 +34,7 @@
     min-height: 100vh;
     overflow-x: hidden;
   }
+  .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 
   /* Background grid */
   body::before {
@@ -205,7 +206,7 @@
     overflow: hidden;
     margin-bottom: 20px;
   }
-  table { width: 100%; border-collapse: collapse; font-size: 0.75rem; }
+  table { width: 100%; min-width: 580px; border-collapse: collapse; font-size: 0.75rem; }
   thead th {
     background: var(--surface2);
     padding: 10px 12px;
@@ -488,7 +489,7 @@
 
   <!-- HISTORY -->
   <div id="view-history" class="view">
-    <div class="section-title">Všechny odečty — stavy měřičů</div>
+    <div class="section-title">Všechny odečty — stavy měřičů <span style="font-size:0.6rem;color:var(--text-muted);font-weight:400;">← scrolluj →</span></div>
     <div class="table-scroll">
       <div class="table-wrap">
         <table id="table-readings">
