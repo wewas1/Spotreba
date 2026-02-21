@@ -555,7 +555,6 @@
 // KONFIGURACE — Google Apps Script
 // ============================================================
 const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwjHJXvy4Dw0tiwpv_xrxjU368JJmWNy-vHuRvKadLOTwvohXRTeoRaEy_CZy38U-M/exec';
-const TOKEN = '=Kzh4[kM7@VBp`7qyK5#';
 
 // ============================================================
 // DATA — importováno z Excel souboru (výchozí / záloha)
@@ -595,8 +594,8 @@ const EXCEL_DATA = {
 async function loadDataFromSheets() {
   showLoading(true);
   try {
-    const url = `${SCRIPT_URL}?token=${encodeURIComponent(TOKEN)}&action=read&t=${Date.now()}`;
-    const resp = await fetch(url, {cache: 'no-store'});
+    const url = `${SCRIPT_URL}?action=read&t=${Date.now()}`;
+    const resp = await fetch(url, {cache: 'no-store', credentials: 'include'});
     const json = await resp.json();
     if (json.error) throw new Error(json.error);
 
@@ -642,8 +641,8 @@ function loadExcelData() {
 
 // Zapíše odečet do Google Sheets
 async function saveToSheets(y, m, cold, hot, elec) {
-  const url = `${SCRIPT_URL}?token=${encodeURIComponent(TOKEN)}&action=write&rok=${y}&mesic=${m}&studena=${cold}&tepla=${hot}&elec=${elec}&t=${Date.now()}`;
-  const resp = await fetch(url, {cache: 'no-store'});
+  const url = `${SCRIPT_URL}?action=write&rok=${y}&mesic=${m}&studena=${cold}&tepla=${hot}&elec=${elec}&t=${Date.now()}`;
+  const resp = await fetch(url, {cache: 'no-store', credentials: 'include'});
   const json = await resp.json();
   if (json.error) throw new Error(json.error);
   return json;
@@ -651,8 +650,8 @@ async function saveToSheets(y, m, cold, hot, elec) {
 
 // Smaže odečet z Google Sheets
 async function deleteFromSheets(y, m) {
-  const url = `${SCRIPT_URL}?token=${encodeURIComponent(TOKEN)}&action=delete&rok=${y}&mesic=${m}&t=${Date.now()}`;
-  const resp = await fetch(url, {cache: 'no-store'});
+  const url = `${SCRIPT_URL}?action=delete&rok=${y}&mesic=${m}&t=${Date.now()}`;
+  const resp = await fetch(url, {cache: 'no-store', credentials: 'include'});
   const json = await resp.json();
   if (json.error) throw new Error(json.error);
   return json;
