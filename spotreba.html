@@ -542,6 +542,10 @@
           <input type="number" id="input-elec" step="1" min="0" placeholder="0">
           <div class="prev-reading" id="prev-elec"></div>
         </div>
+        <div class="form-field">
+          <label>Den odečtu</label>
+          <input type="number" id="input-den" step="1" min="1" max="31" placeholder="1-31">
+        </div>
       </div>
       <button class="btn-submit" onclick="saveReading()">Uložit odečet</button>
       <div class="alert success" id="alert-success">✓ Odečet byl uložen.</div>
@@ -607,7 +611,8 @@ async function loadDataFromSheets() {
       const [rok, mesic, studena, tepla, elec] = rows[i];
       if (!rok || !mesic) continue;
       const key = `${rok}-${mesic}`;
-      data[key] = { year: parseInt(rok), month: parseInt(mesic), cold: studena, hot: tepla, elec: elec };
+      const denVal = rows[i][5] || 1;
+      data[key] = { year: parseInt(rok), month: parseInt(mesic), cold: studena, hot: tepla, elec: elec, den: denVal };
     }
     DATA = data;
     showLoading(false);
@@ -641,8 +646,8 @@ function loadExcelData() {
 }
 
 // Zapíše odečet do Google Sheets
-async function saveToSheets(y, m, cold, hot, elec) {
-  const url = `${SCRIPT_URL}?token=${encodeURIComponent(TOKEN)}&action=write&rok=${y}&mesic=${m}&studena=${cold}&tepla=${hot}&elec=${elec}&t=${Date.now()}`;
+async function saveToSheets(y, m, cold, hot, elec, den) {
+  const url = `${SCRIPT_URL}?token=${encodeURIComponent(TOKEN)}&action=write&rok=${y}&mesic=${m}&studena=${cold}&tepla=${hot}&elec=${elec}&den=${den}&t=${Date.now()}`;
   const resp = await fetch(url, {cache: 'no-store'});
   const json = await resp.json();
   if (json.error) throw new Error(json.error);
@@ -957,7 +962,8 @@ function renderHistory() {
       dcClass = 'val-cold'; dhClass = 'val-hot'; deClass = 'val-elec';
       dc = '+'+dc; dh = '+'+dh; de = '+'+de;
     }
-    const lbl = `${MONTHS[m-1]} ${y}`;
+    const denStr = r.den ? `${r.den}. ` : '';
+    const lbl = `${denStr}${MONTHS[m-1]} ${y}`;
     const card = document.createElement('div');
     card.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:10px;';
     card.innerHTML = `
@@ -1045,6 +1051,7 @@ function initInputForm() {
     yearSel.appendChild(opt);
   }
   document.getElementById('input-month').value = now.getMonth()+1;
+  document.getElementById('input-den').value = now.getDate();
   updatePrevReadings();
 
   document.getElementById('input-year').onchange = updatePrevReadings;
@@ -1088,12 +1095,13 @@ async function saveReading() {
   const cold = parseFloat(document.getElementById('input-cold').value);
   const hot = parseFloat(document.getElementById('input-hot').value);
   const elec = parseFloat(document.getElementById('input-elec').value);
+  const den = parseInt(document.getElementById('input-den').value) || new Date().getDate();
 
   const alertOk = document.getElementById('alert-success');
   const alertErr = document.getElementById('alert-error');
   alertOk.classList.remove('show'); alertErr.classList.remove('show');
 
-  if (isNaN(cold)||isNaN(hot)||isNaN(elec)||cold<0||hot<0||elec<0) {
+  if (isNaN(cold)||isNaN(hot)||isNaN(elec)||cold<0||hot<0||elec<0||den<1||den>31) {
     alertErr.textContent = '✗ Chyba: zkontrolujte zadané hodnoty.';
     alertErr.classList.add('show'); return;
   }
@@ -1115,8 +1123,8 @@ async function saveReading() {
   btn.textContent = 'Ukládám...';
   btn.disabled = true;
   try {
-    await saveToSheets(y, m, cold, hot, elec);
-    DATA[currKey] = { year:y, month:m, cold, hot, elec };
+    await saveToSheets(y, m, cold, hot, elec, den);
+    DATA[currKey] = { year:y, month:m, cold, hot, elec, den };
     alertOk.textContent = '✓ Odečet byl uložen do Google Sheets.';
     alertOk.classList.add('show');
     setTimeout(() => alertOk.classList.remove('show'), 4000);
