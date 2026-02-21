@@ -351,7 +351,47 @@
 </div>
 <div id="global-error" style="display:none;position:fixed;top:12px;left:50%;transform:translateX(-50%);background:#1a2430;border:1px solid #f87171;color:#f87171;padding:10px 20px;border-radius:8px;font-size:0.8rem;z-index:999;max-width:90vw;text-align:center;"></div>
 <style>@keyframes loadpulse{0%{opacity:1}50%{opacity:0.4}100%{opacity:1}}</style>
-<div class="app">
+<div id="login-overlay" style="
+  position:fixed;inset:0;z-index:9999;
+  background:#0a0f14;
+  display:flex;align-items:center;justify-content:center;
+">
+  <div style="
+    background:#111820;border:1px solid #1f2f3f;border-radius:16px;
+    padding:40px 32px;width:90%;max-width:360px;text-align:center;
+  ">
+    <div style="font-family:'Syne',sans-serif;font-size:1.6rem;font-weight:800;
+      background:linear-gradient(135deg,#38bdf8,#fb923c);
+      -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+      margin-bottom:8px;">Spotřeba</div>
+    <div style="font-size:0.7rem;color:#5a7a8a;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:28px;">
+      Domácnost · Evidence měřičů
+    </div>
+    <input type="password" id="login-password"
+      placeholder="Zadej heslo..."
+      onkeydown="if(event.key==='Enter')checkLogin()"
+      style="
+        display:block;width:100%;
+        background:#1a2430;border:1px solid #1f2f3f;border-radius:8px;
+        color:#e2eaf3;font-family:'DM Mono',monospace;font-size:0.9rem;
+        padding:12px 16px;outline:none;margin-bottom:12px;
+        text-align:center;letter-spacing:0.1em;
+      ">
+    <button onclick="checkLogin()" style="
+      width:100%;
+      background:linear-gradient(135deg,rgba(56,189,248,0.15),rgba(167,139,250,0.15));
+      border:1px solid rgba(56,189,248,0.3);color:#e2eaf3;
+      font-family:'Syne',sans-serif;font-weight:700;font-size:0.85rem;
+      padding:12px;border-radius:8px;cursor:pointer;letter-spacing:0.05em;
+    ">Přihlásit se</button>
+    <div id="login-error" style="
+      display:none;margin-top:12px;
+      color:#f87171;font-size:0.75rem;
+    ">Nesprávné heslo. Zkus to znovu.</div>
+  </div>
+</div>
+
+<div class="app" id="main-app" style="display:none;">
   <header>
     <div class="logo-block">
       <h1>Spotřeba</h1>
@@ -461,6 +501,7 @@
               <th>Δ St.</th>
               <th>Δ Tepl.</th>
               <th>Δ Elektr.</th>
+              <th></th>
             </tr>
           </thead>
           <tbody id="tbody-readings"></tbody>
@@ -531,7 +572,7 @@
 // KONFIGURACE — Google Apps Script
 // ============================================================
 const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwP5Tf2u5iuk8Eb_x6a78c1d6Er-WRuwfXvfacu8752AJlwJ339XAKS4qkcmd6RBjI/exec';
-const TOKEN = 'Bhj2+gkP,2ndV#8zV3th';
+const TOKEN = '=Kzh4[kM7@VBp`7qyK5#';
 
 // ============================================================
 // DATA — importováno z Excel souboru (výchozí / záloha)
@@ -623,6 +664,30 @@ async function saveToSheets(y, m, cold, hot, elec) {
   const json = await resp.json();
   if (json.error) throw new Error(json.error);
   return json;
+}
+
+// Smaže odečet z Google Sheets
+async function deleteFromSheets(y, m) {
+  const url = `${SCRIPT_URL}?token=${encodeURIComponent(TOKEN)}&action=delete&rok=${y}&mesic=${m}`;
+  const resp = await fetch(url);
+  const json = await resp.json();
+  if (json.error) throw new Error(json.error);
+  return json;
+}
+
+async function deleteReading(year, month, label) {
+  if (!confirm(`Opravdu smazat odečet ${label}? Tato akce je nevratná.`)) return;
+  showLoading(true);
+  try {
+    await deleteFromSheets(year, month);
+    delete DATA[`${year}-${month}`];
+    showLoading(false);
+    renderHistory();
+    renderOverview();
+  } catch(e) {
+    showLoading(false);
+    showError('Chyba při mazání: ' + e.message);
+  }
 }
 
 function showLoading(visible) {
@@ -909,14 +974,16 @@ function renderHistory() {
       de = `+${r.elec-prev.elec}`;
     }
     const tr = document.createElement('tr');
+    const lbl = `${MONTHS[m-1]} ${y}`;
     tr.innerHTML = `
-      <td>${MONTHS[m-1]} ${y}</td>
+      <td>${lbl}</td>
       <td class="reading">${r.cold}</td>
       <td class="reading">${r.hot}</td>
       <td class="reading">${r.elec.toLocaleString('cs')}</td>
       <td class="val-cold">${dc}</td>
       <td class="val-hot">${dh}</td>
       <td class="val-elec">${de}</td>
+      <td><button onclick="deleteReading(${y},${m},'${lbl}')" style="background:none;border:1px solid #3a1f1f;color:#f87171;font-size:0.7rem;padding:3px 8px;border-radius:5px;cursor:pointer;font-family:'DM Mono',monospace;">smazat</button></td>
     `;
     tbody.appendChild(tr);
   }
@@ -1136,8 +1203,39 @@ function renderAll() {
   renderOverview();
 }
 
-// INIT — načti data ze Sheets
-loadDataFromSheets();
+// ============================================================
+// PŘIHLÁŠENÍ
+// ============================================================
+// Heslo je uloženo jako SHA-256 hash — nikdo ho z kódu nevyčte
+const PASSWORD_HASH = '05f3235546a98c40efc48600950deabea6499770547c0538b2d5467e7108af1e';
+
+async function hashPassword(pwd) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pwd));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+async function checkLogin() {
+  const pwd = document.getElementById('login-password').value;
+  const hash = await hashPassword(pwd);
+  if (hash === PASSWORD_HASH) {
+    document.getElementById('login-overlay').style.display = 'none';
+    document.getElementById('main-app').style.display = 'block';
+    sessionStorage.setItem('auth', '1');
+    loadDataFromSheets();
+  } else {
+    document.getElementById('login-error').style.display = 'block';
+    document.getElementById('login-password').value = '';
+    document.getElementById('login-password').focus();
+  }
+}
+
+// Pokud je již přihlášen v této session
+if (sessionStorage.getItem('auth') === '1') {
+  document.getElementById('login-overlay').style.display = 'none';
+  document.getElementById('main-app').style.display = 'block';
+  loadDataFromSheets();
+}
 </script>
+</div><!-- /main-app -->
 </body>
 </html>
