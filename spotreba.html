@@ -489,26 +489,8 @@
 
   <!-- HISTORY -->
   <div id="view-history" class="view">
-    <div class="section-title">Všechny odečty — stavy měřičů <span style="font-size:0.6rem;color:var(--text-muted);font-weight:400;">← scrolluj →</span></div>
-    <div class="table-scroll">
-      <div class="table-wrap">
-        <table id="table-readings">
-          <thead>
-            <tr>
-              <th>Datum</th>
-              <th>St. voda (m³)</th>
-              <th>Teplá voda (m³)</th>
-              <th>Elektřina (kWh)</th>
-              <th>Δ St.</th>
-              <th>Δ Tepl.</th>
-              <th>Δ Elektr.</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="tbody-readings"></tbody>
-        </table>
-      </div>
-    </div>
+    <div class="section-title">Všechny odečty — stavy měřičů</div>
+    <div id="history-list"></div>
 
     <div class="export-section">
       <div class="export-info">
@@ -613,8 +595,8 @@ const EXCEL_DATA = {
 async function loadDataFromSheets() {
   showLoading(true);
   try {
-    const url = `${SCRIPT_URL}?token=${encodeURIComponent(TOKEN)}&action=read`;
-    const resp = await fetch(url);
+    const url = `${SCRIPT_URL}?token=${encodeURIComponent(TOKEN)}&action=read&t=${Date.now()}`;
+    const resp = await fetch(url, {cache: 'no-store'});
     const json = await resp.json();
     if (json.error) throw new Error(json.error);
 
@@ -660,8 +642,8 @@ function loadExcelData() {
 
 // Zapíše odečet do Google Sheets
 async function saveToSheets(y, m, cold, hot, elec) {
-  const url = `${SCRIPT_URL}?token=${encodeURIComponent(TOKEN)}&action=write&rok=${y}&mesic=${m}&studena=${cold}&tepla=${hot}&elec=${elec}`;
-  const resp = await fetch(url);
+  const url = `${SCRIPT_URL}?token=${encodeURIComponent(TOKEN)}&action=write&rok=${y}&mesic=${m}&studena=${cold}&tepla=${hot}&elec=${elec}&t=${Date.now()}`;
+  const resp = await fetch(url, {cache: 'no-store'});
   const json = await resp.json();
   if (json.error) throw new Error(json.error);
   return json;
@@ -669,8 +651,8 @@ async function saveToSheets(y, m, cold, hot, elec) {
 
 // Smaže odečet z Google Sheets
 async function deleteFromSheets(y, m) {
-  const url = `${SCRIPT_URL}?token=${encodeURIComponent(TOKEN)}&action=delete&rok=${y}&mesic=${m}`;
-  const resp = await fetch(url);
+  const url = `${SCRIPT_URL}?token=${encodeURIComponent(TOKEN)}&action=delete&rok=${y}&mesic=${m}&t=${Date.now()}`;
+  const resp = await fetch(url, {cache: 'no-store'});
   const json = await resp.json();
   if (json.error) throw new Error(json.error);
   return json;
@@ -959,34 +941,52 @@ function renderOverview() {
 // ============================================================
 function renderHistory() {
   const keys = getSortedKeys().reverse();
-  const tbody = document.getElementById('tbody-readings');
-  tbody.innerHTML = '';
   const allKeys = getSortedKeys();
+  const container = document.getElementById('history-list');
+  container.innerHTML = '';
 
   for (const key of keys) {
     const [y,m] = key.split('-').map(Number);
     const r = DATA[key];
     const idx = allKeys.indexOf(key);
     let dc='—', dh='—', de='—';
+    let dcClass='', dhClass='', deClass='';
     if (idx > 0) {
       const prev = DATA[allKeys[idx-1]];
-      dc = `+${r.cold-prev.cold}`;
-      dh = `+${r.hot-prev.hot}`;
-      de = `+${r.elec-prev.elec}`;
+      dc = r.cold-prev.cold; dh = r.hot-prev.hot; de = r.elec-prev.elec;
+      dcClass = 'val-cold'; dhClass = 'val-hot'; deClass = 'val-elec';
+      dc = '+'+dc; dh = '+'+dh; de = '+'+de;
     }
-    const tr = document.createElement('tr');
     const lbl = `${MONTHS[m-1]} ${y}`;
-    tr.innerHTML = `
-      <td>${lbl}</td>
-      <td class="reading">${r.cold}</td>
-      <td class="reading">${r.hot}</td>
-      <td class="reading">${r.elec.toLocaleString('cs')}</td>
-      <td class="val-cold">${dc}</td>
-      <td class="val-hot">${dh}</td>
-      <td class="val-elec">${de}</td>
-      <td><button onclick="deleteReading(${y},${m},'${lbl}')" style="background:none;border:1px solid #3a1f1f;color:#f87171;font-size:0.7rem;padding:3px 8px;border-radius:5px;cursor:pointer;font-family:'DM Mono',monospace;">smazat</button></td>
+    const card = document.createElement('div');
+    card.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:10px;';
+    card.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:0.9rem;color:var(--text);">${lbl}</div>
+        <button onclick="deleteReading(${y},${m},'${lbl}')"
+          style="background:none;border:1px solid #3a1f1f;color:#f87171;font-size:0.7rem;padding:4px 10px;border-radius:5px;cursor:pointer;font-family:'DM Mono',monospace;">
+          smazat
+        </button>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+        <div style="background:var(--surface2);border-radius:8px;padding:8px 10px;">
+          <div style="font-size:0.6rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:4px;">Studená voda</div>
+          <div style="font-size:0.85rem;color:var(--accent-water-cold);">${r.cold} <span style="font-size:0.65rem;color:var(--text-muted);">m³</span></div>
+          <div style="font-size:0.7rem;color:var(--text-muted);margin-top:2px;" class="${dcClass}">${dc}</div>
+        </div>
+        <div style="background:var(--surface2);border-radius:8px;padding:8px 10px;">
+          <div style="font-size:0.6rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:4px;">Teplá voda</div>
+          <div style="font-size:0.85rem;color:var(--accent-water-hot);">${r.hot} <span style="font-size:0.65rem;color:var(--text-muted);">m³</span></div>
+          <div style="font-size:0.7rem;color:var(--text-muted);margin-top:2px;" class="${dhClass}">${dh}</div>
+        </div>
+        <div style="background:var(--surface2);border-radius:8px;padding:8px 10px;">
+          <div style="font-size:0.6rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:4px;">Elektřina</div>
+          <div style="font-size:0.85rem;color:var(--accent-elec);">${r.elec.toLocaleString('cs')} <span style="font-size:0.65rem;color:var(--text-muted);">kWh</span></div>
+          <div style="font-size:0.7rem;color:var(--text-muted);margin-top:2px;" class="${deClass}">${de}</div>
+        </div>
+      </div>
     `;
-    tbody.appendChild(tr);
+    container.appendChild(card);
   }
 }
 
