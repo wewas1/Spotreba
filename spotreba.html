@@ -575,6 +575,10 @@
             <input type="number" id="vym-hot-new" step="0.1" min="0" placeholder="počáteční stav nového">
           </div>
         </div>
+          <div class="form-field full">
+            <label>Datum výměny</label>
+            <input type="date" id="vym-datum" style="background:var(--surface);border:1px solid var(--border);border-radius:7px;color:var(--text);font-family:'DM Mono',monospace;font-size:0.85rem;padding:10px 12px;outline:none;width:100%;color-scheme:dark;">
+          </div>
         <div style="font-size:0.7rem;color:var(--text-muted);margin-top:10px;">
           Spotřeba za měsíc = (starý konec − předchozí odečet) + (pole Studená/Teplá voda výše − nový start)
         </div>
@@ -659,10 +663,11 @@ async function loadDataFromSheets() {
         for (let i = 1; i < jsonV.data.length; i++) {
           const [rok, mesic, coldOld, coldNew, hotOld, hotNew] = jsonV.data[i];
           if (!rok || !mesic) continue;
-          VYMENY[`${rok}-${mesic}`] = { coldOld, coldNew, hotOld, hotNew };
+          const datum = jsonV.data[i][6] || '';
+          VYMENY[`${rok}-${mesic}`] = { coldOld, coldNew, hotOld, hotNew, datum };
         }
       }
-    } catch(e2) { /* výměny nejsou kritické */ }
+    } catch(e2) { /* výměny nejsou kritické — list ještě neexistuje */ }
 
     showLoading(false);
     renderAll();
@@ -704,8 +709,8 @@ async function saveToSheets(y, m, cold, hot, elec, den) {
 }
 
 // Uloží výměnu vodoměru do Google Sheets (list Vymeny)
-async function saveVymenaToSheets(y, m, coldOld, coldNew, hotOld, hotNew) {
-  const url = `${SCRIPT_URL}?token=${encodeURIComponent(TOKEN)}&action=writeVymena&rok=${y}&mesic=${m}&coldOld=${coldOld}&coldNew=${coldNew}&hotOld=${hotOld}&hotNew=${hotNew}&t=${Date.now()}`;
+async function saveVymenaToSheets(y, m, coldOld, coldNew, hotOld, hotNew, datum) {
+  const url = `${SCRIPT_URL}?token=${encodeURIComponent(TOKEN)}&action=writeVymena&rok=${y}&mesic=${m}&coldOld=${coldOld}&coldNew=${coldNew}&hotOld=${hotOld}&hotNew=${hotNew}&datum=${encodeURIComponent(datum)}&t=${Date.now()}`;
   const resp = await fetch(url, {cache: 'no-store'});
   const json = await resp.json();
   if (json.error) throw new Error(json.error);
@@ -739,6 +744,11 @@ async function deleteReading(year, month, label) {
 function toggleVymena() {
   const checked = document.getElementById('input-vymena').checked;
   document.getElementById('vymena-block').style.display = checked ? 'block' : 'none';
+  if (checked) {
+    const now = new Date();
+    const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+    document.getElementById('vym-datum').value = dateStr;
+  }
   // Při výměně zakáže validaci nižší hodnoty pro vodu
   if (checked) {
     document.getElementById('input-cold').placeholder = 'aktuální stav nového';
@@ -1062,6 +1072,7 @@ function renderHistory() {
     const card = document.createElement('div');
     card.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:10px;';
     card.innerHTML = `
+      ${vym ? `<div style="font-size:0.65rem;color:var(--accent-water-cold);letter-spacing:0.08em;text-transform:uppercase;margin-bottom:8px;">⚙ Výměna vodoměru${vym.datum ? ' — ' + vym.datum.split('-').reverse().join('.') : ''}</div>` : ''}
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
         <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:0.9rem;color:var(--text);">${lbl}</div>
         <button onclick="deleteReading(${y},${m},'${lbl}')"
@@ -1236,8 +1247,9 @@ async function saveReading() {
 
     // Ulož výměnu pokud je zaškrtnuta
     if (jeVymena) {
-      await saveVymenaToSheets(y, m, coldOld, coldNew, hotOld, hotNew);
-      VYMENY[currKey] = { coldOld, coldNew, hotOld, hotNew };
+      const vymDatum = document.getElementById('vym-datum').value || '';
+      await saveVymenaToSheets(y, m, coldOld, coldNew, hotOld, hotNew, vymDatum);
+      VYMENY[currKey] = { coldOld, coldNew, hotOld, hotNew, datum: vymDatum };
     }
 
     alertOk.textContent = jeVymena
