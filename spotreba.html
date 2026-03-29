@@ -249,6 +249,7 @@
   .form-field { display: flex; flex-direction: column; gap: 6px; }
   .form-field.full { grid-column: 1/-1; }
   label { font-size: 0.65rem; color: var(--text-muted); letter-spacing: 0.08em; text-transform: uppercase; }
+  label span { font-size: 0.75rem; color: var(--text-dim); text-transform: none; letter-spacing: 0; }
   input, select {
     background: var(--surface2);
     border: 1px solid var(--border);
@@ -546,7 +547,39 @@
           <label>Den odečtu</label>
           <input type="number" id="input-den" step="1" min="1" max="31" placeholder="1-31">
         </div>
+        <div class="form-field full">
+          <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+            <input type="checkbox" id="input-vymena" onchange="toggleVymena()" style="width:18px;height:18px;cursor:pointer;accent-color:var(--accent-water-cold);">
+            <span>Výměna vodoměru</span>
+          </label>
+        </div>
       </div>
+
+      <div id="vymena-block" style="display:none;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:16px;margin-top:12px;">
+        <div style="font-size:0.7rem;color:var(--accent-water-cold);letter-spacing:0.08em;text-transform:uppercase;margin-bottom:14px;">⚙ Výměna vodoměru — zadej oba stavy</div>
+        <div class="form-grid">
+          <div class="form-field">
+            <label>Starý stav — Studená (m³)</label>
+            <input type="number" id="vym-cold-old" step="0.1" min="0" placeholder="poslední stav starého">
+          </div>
+          <div class="form-field">
+            <label>Nový stav — Studená (m³)</label>
+            <input type="number" id="vym-cold-new" step="0.1" min="0" placeholder="počáteční stav nového">
+          </div>
+          <div class="form-field">
+            <label>Starý stav — Teplá (m³)</label>
+            <input type="number" id="vym-hot-old" step="0.1" min="0" placeholder="poslední stav starého">
+          </div>
+          <div class="form-field">
+            <label>Nový stav — Teplá (m³)</label>
+            <input type="number" id="vym-hot-new" step="0.1" min="0" placeholder="počáteční stav nového">
+          </div>
+        </div>
+        <div style="font-size:0.7rem;color:var(--text-muted);margin-top:10px;">
+          Spotřeba za měsíc = (starý konec − předchozí odečet) + (pole Studená/Teplá voda výše − nový start)
+        </div>
+      </div>
+
       <button class="btn-submit" onclick="saveReading()">Uložit odečet</button>
       <div class="alert success" id="alert-success">✓ Odečet byl uložen.</div>
       <div class="alert error" id="alert-error">✗ Chyba: zkontrolujte zadané hodnoty.</div>
@@ -615,6 +648,22 @@ async function loadDataFromSheets() {
       data[key] = { year: parseInt(rok), month: parseInt(mesic), cold: studena, hot: tepla, elec: elec, den: denVal };
     }
     DATA = data;
+
+    // Načti výměny vodoměrů
+    try {
+      const urlV = `${SCRIPT_URL}?token=${encodeURIComponent(TOKEN)}&action=readVymeny&t=${Date.now()}`;
+      const respV = await fetch(urlV, {cache: 'no-store'});
+      const jsonV = await respV.json();
+      if (!jsonV.error && jsonV.data) {
+        VYMENY = {};
+        for (let i = 1; i < jsonV.data.length; i++) {
+          const [rok, mesic, coldOld, coldNew, hotOld, hotNew] = jsonV.data[i];
+          if (!rok || !mesic) continue;
+          VYMENY[`${rok}-${mesic}`] = { coldOld, coldNew, hotOld, hotNew };
+        }
+      }
+    } catch(e2) { /* výměny nejsou kritické */ }
+
     showLoading(false);
     renderAll();
   } catch(e) {
@@ -654,6 +703,15 @@ async function saveToSheets(y, m, cold, hot, elec, den) {
   return json;
 }
 
+// Uloží výměnu vodoměru do Google Sheets (list Vymeny)
+async function saveVymenaToSheets(y, m, coldOld, coldNew, hotOld, hotNew) {
+  const url = `${SCRIPT_URL}?token=${encodeURIComponent(TOKEN)}&action=writeVymena&rok=${y}&mesic=${m}&coldOld=${coldOld}&coldNew=${coldNew}&hotOld=${hotOld}&hotNew=${hotNew}&t=${Date.now()}`;
+  const resp = await fetch(url, {cache: 'no-store'});
+  const json = await resp.json();
+  if (json.error) throw new Error(json.error);
+  return json;
+}
+
 // Smaže odečet z Google Sheets
 async function deleteFromSheets(y, m) {
   const url = `${SCRIPT_URL}?token=${encodeURIComponent(TOKEN)}&action=delete&rok=${y}&mesic=${m}&t=${Date.now()}`;
@@ -678,6 +736,41 @@ async function deleteReading(year, month, label) {
   }
 }
 
+function toggleVymena() {
+  const checked = document.getElementById('input-vymena').checked;
+  document.getElementById('vymena-block').style.display = checked ? 'block' : 'none';
+  // Při výměně zakáže validaci nižší hodnoty pro vodu
+  if (checked) {
+    document.getElementById('input-cold').placeholder = 'aktuální stav nového';
+    document.getElementById('input-hot').placeholder = 'aktuální stav nového';
+  } else {
+    document.getElementById('input-cold').placeholder = '0.0';
+    document.getElementById('input-hot').placeholder = '0.0';
+  }
+}
+
+// Vrátí spotřebu pro daný měsíc se zohledněním výměny
+function getConsumptionWithVymena(key, type) {
+  const keys = getSortedKeys();
+  const idx = keys.indexOf(key);
+  if (idx <= 0) return null;
+  const curr = DATA[key];
+  const prev = DATA[keys[idx-1]];
+  if (!curr || !prev) return null;
+
+  // Pokud je pro tento měsíc zaznamenaná výměna
+  const vym = VYMENY[key];
+  if (vym && (type === 'cold' || type === 'hot')) {
+    const oldEnd = type === 'cold' ? vym.coldOld : vym.hotOld;
+    const newStart = type === 'cold' ? vym.coldNew : vym.hotNew;
+    const spotreba1 = oldEnd - prev[type];   // spotřeba na starém vodoměru
+    const spotreba2 = curr[type] - newStart; // spotřeba na novém vodoměru
+    return spotreba1 + spotreba2;
+  }
+
+  return curr[type] - prev[type];
+}
+
 function showLoading(visible) {
   document.getElementById('loading-bar').style.display = visible ? 'block' : 'none';
 }
@@ -690,6 +783,7 @@ function showError(msg) {
 }
 
 let DATA = {};
+let VYMENY = {}; // { "rok-mesic": { coldOld, coldNew, hotOld, hotNew } }
 
 function getSortedKeys() {
   return Object.keys(DATA).sort((a,b) => {
@@ -766,8 +860,8 @@ function renderOverviewChart() {
     labels.push(`${MONTHS_SHORT[m-1]} ${y}`);
     const prev = DATA[keys[i-1]];
     const curr = DATA[keys[i]];
-    coldData.push(curr.cold - prev.cold);
-    hotData.push(curr.hot - prev.hot);
+    coldData.push(getConsumptionWithVymena(keys[i], 'cold') ?? (curr.cold - prev.cold));
+    hotData.push(getConsumptionWithVymena(keys[i], 'hot') ?? (curr.hot - prev.hot));
     elecData.push(curr.elec - prev.elec);
   }
 
@@ -806,8 +900,8 @@ function renderMainGraph() {
       const [y,m] = keys[i].split('-').map(Number);
       labels.push(`${MONTHS_SHORT[m-1]} ${y}`);
       const prev = DATA[keys[i-1]], curr = DATA[keys[i]];
-      coldArr.push(curr.cold - prev.cold);
-      hotArr.push(curr.hot - prev.hot);
+      coldArr.push(getConsumptionWithVymena(keys[i], 'cold') ?? (curr.cold - prev.cold));
+      hotArr.push(getConsumptionWithVymena(keys[i], 'hot') ?? (curr.hot - prev.hot));
       elecArr.push(curr.elec - prev.elec);
     }
     if (graphMetric==='all'||graphMetric==='cold') datasets.push({ label:'Studená voda (m³)', data:coldArr, borderColor:'#38bdf8', backgroundColor:'rgba(56,189,248,0.1)', tension:0.3, yAxisID:'y' });
@@ -964,6 +1058,7 @@ function renderHistory() {
     }
     const denStr = r.den ? `${r.den}. ` : '';
     const lbl = `${denStr}${MONTHS[m-1]} ${y}`;
+    const vym = VYMENY[key];
     const card = document.createElement('div');
     card.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:10px;';
     card.innerHTML = `
@@ -1096,6 +1191,7 @@ async function saveReading() {
   const hot = parseFloat(document.getElementById('input-hot').value);
   const elec = parseFloat(document.getElementById('input-elec').value);
   const den = parseInt(document.getElementById('input-den').value) || new Date().getDate();
+  const jeVymena = document.getElementById('input-vymena').checked;
 
   const alertOk = document.getElementById('alert-success');
   const alertErr = document.getElementById('alert-error');
@@ -1106,11 +1202,24 @@ async function saveReading() {
     alertErr.classList.add('show'); return;
   }
 
-  // Validace proti předchozímu odečtu
+  // Validace výměny
+  let coldOld=null, coldNew=null, hotOld=null, hotNew=null;
+  if (jeVymena) {
+    coldOld = parseFloat(document.getElementById('vym-cold-old').value);
+    coldNew = parseFloat(document.getElementById('vym-cold-new').value);
+    hotOld  = parseFloat(document.getElementById('vym-hot-old').value);
+    hotNew  = parseFloat(document.getElementById('vym-hot-new').value);
+    if (isNaN(coldOld)||isNaN(coldNew)||isNaN(hotOld)||isNaN(hotNew)) {
+      alertErr.textContent = '✗ Chyba: vyplň všechny stavy vodoměrů.';
+      alertErr.classList.add('show'); return;
+    }
+  }
+
+  // Validace proti předchozímu odečtu (jen pokud není výměna)
   const keys = getSortedKeys();
   const currKey = `${y}-${m}`;
   const prevKeys = keys.filter(k=>k<currKey && k !== currKey);
-  if (prevKeys.length) {
+  if (prevKeys.length && !jeVymena) {
     const prev = DATA[prevKeys[prevKeys.length-1]];
     if (cold < prev.cold || hot < prev.hot || elec < prev.elec) {
       alertErr.textContent = '✗ Chyba: hodnoty nesmí být nižší než předchozí odečet.';
@@ -1118,14 +1227,22 @@ async function saveReading() {
     }
   }
 
-  // Uložení do Google Sheets
   const btn = document.querySelector('.btn-submit');
   btn.textContent = 'Ukládám...';
   btn.disabled = true;
   try {
     await saveToSheets(y, m, cold, hot, elec, den);
     DATA[currKey] = { year:y, month:m, cold, hot, elec, den };
-    alertOk.textContent = '✓ Odečet byl uložen do Google Sheets.';
+
+    // Ulož výměnu pokud je zaškrtnuta
+    if (jeVymena) {
+      await saveVymenaToSheets(y, m, coldOld, coldNew, hotOld, hotNew);
+      VYMENY[currKey] = { coldOld, coldNew, hotOld, hotNew };
+    }
+
+    alertOk.textContent = jeVymena
+      ? '✓ Odečet i výměna vodoměru uloženy.'
+      : '✓ Odečet byl uložen do Google Sheets.';
     alertOk.classList.add('show');
     setTimeout(() => alertOk.classList.remove('show'), 4000);
     updatePrevReadings();
